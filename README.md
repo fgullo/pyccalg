@@ -10,7 +10,7 @@ Specifically, an implementation of the (linear-programming + region-growing) O(l
 
 ### Usage:
 
-``` python src/ologncc.py -d <DATASET_FILE> [-r <LB,UB>] [-s {'scipy','pulp'}```
+``` python src/ologncc.py -d <DATASET_FILE> [-r <LB,UB>] [-s {'scipy','pulp'}]```
 
 * Optional arguments: 
    * `-r <LB,UB>`, if you want to generate random edge weights from `[LB,UB]` range

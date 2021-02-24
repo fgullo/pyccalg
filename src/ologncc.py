@@ -131,7 +131,7 @@ def _linear_program_pulp(num_vertices,edges,graph):
 	opt_model = plp.LpProblem(name='GeneralWeightedCC')
 	vertex_pairs = int(num_vertices*(num_vertices-1)/2)
 
-	x_vars  = {i: plp.LpVariable(cat=plp.LpContinuous, lowBound=0, upBound=1, name='x_{0}'.format(i)) for i in range(vertex_pairs)}
+	x_vars  = {i: plp.LpVariable(cat=plp.LpContinuous, lowBound=0, upBound=10, name='x_{0}'.format(i)) for i in range(vertex_pairs)}
 
 	c_count = 0
 	constraints = {}
@@ -163,8 +163,9 @@ def _linear_program_pulp(num_vertices,edges,graph):
 	return opt_model
 
 def _solve_lp_pulp(model):
-	status = model.solve()
-	return status
+	model.solve()
+	lp_var_assignment = [x.varValue for x in model.variables()]
+	return lp_var_assignment
 
 def _sorted_distances(u,valid_vertices,num_vertices,x):
 	du = []
@@ -382,18 +383,20 @@ if __name__ == '__main__':
 	A = None
 	b = None
 	c = None
+	c_nonzero = None
 	if solver == 'pulp':
 		model = _linear_program_pulp(n,edges,graph)
 	elif solver == 'scipy':
 		(A,b,c) = _linear_program_scipy(n,edges,graph)
+		c_nonzero = len([x for x in c if x != 0])
 	else:
 		raise Exception('Solver \'%s\' not supported' %(solver))
 	runtime = _running_time_ms(start)
-	c_nonzero = len([x for x in c if x != 0])
 	print('Linear program successfully built in %d ms' %(runtime))
-	print('#variables: %d (must be equal to #vertex pairs)' %(len(c)))
-	print('#inequality constraints: %d (must be equal to #vertex triples)' %(len(A)))
-	print('#non-zero entries in cost vector: %d (must be <= #edges)' %(c_nonzero))
+	if solver == 'scipy':
+		print('#variables: %d (must be equal to #vertex pairs)' %(len(c)))
+		print('#inequality constraints: %d (must be equal to #vertex triples)' %(len(A)))
+		print('#non-zero entries in cost vector: %d (must be <= #edges)' %(c_nonzero))
 
 	#solving linear program
 	print(separator)
@@ -407,6 +410,10 @@ if __name__ == '__main__':
 	else:
 		raise Exception('Solver \'%s\' not supported' %(solver))
 	runtime = _running_time_ms(start)
+	#########
+	#DEBUG
+	print(lp_var_assignment)
+	#########
 	print('Linear program successfully solved in %d ms' %(runtime))
 	print('size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
 
