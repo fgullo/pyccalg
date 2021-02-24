@@ -10,9 +10,11 @@ Specifically, an implementation of the (linear-programming + region-growing) O(l
 
 ### Usage:
 
-``` python src/ologncc.py -d <DATASET_FILE> [-r <LB,UB>]```
+``` python src/ologncc.py -d <DATASET_FILE> [-r <LB,UB>] [-s {'scipy','pulp'}```
 
-* Optional argument: `-r <LB,UB>`, if you want to generate random edge weights from `[LB,UB]` range 
+* Optional arguments: 
+   * `-r <LB,UB>`, if you want to generate random edge weights from `[LB,UB]` range
+   * `-s {'scipy','pulp'}`, to select the solver to be used (default: `'pulp'` (because it is faster))
 * Dataset-file format:
    * First line: `#VERTICES \t #EDGES`
    * One line per edge; every line is a quadruple: `NODE1 \t NODE2 \t POSITIVE_WEIGHT \t NEGATIVE_WEIGHT` (`POSITIVE_WEIGHT` and `NEGATIVE_WEIGHT` are ignored if code is run with `-r` option)

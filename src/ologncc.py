@@ -1,5 +1,5 @@
 import os, sys, getopt, time
-from scipy.optimize import linprog
+import pulp as plp
 
 separator = '---------------'
 
@@ -54,19 +54,22 @@ def _load(dataset_path,random_edgeweight_generation):
 def _read_params():
 	dataset_file = None
 	random_edgeweight_generation = None
-	short_params = 'd:r:'
-	long_params = ['dataset=','random=']
+	solver = 'pulp'
+	short_params = 'd:r:s:'
+	long_params = ['dataset=','random=','solver=']
 	try:
 		arguments, values = getopt.getopt(sys.argv[1:], short_params, long_params)
 	except getopt.error as err:
-		print('ologncc.py -d <dataset_file> [-r <rnd_edge_weight_LB,rnd_edge_weight_UB>]')
+		print('ologncc.py -d <dataset_file> [-r <rnd_edge_weight_LB,rnd_edge_weight_UB>] [-s <solver>]')
 		sys.exit(2)
 	for arg, value in arguments:
 		if arg in ('-d', '--dataset'):
 			dataset_file = value
 		elif arg in ('-r', '--random'):
 			random_edgeweight_generation = [float(x) for x in value.split(',')]
-	return (dataset_file,random_edgeweight_generation)
+		elif arg in ('-s', '--solver'):
+			solver = value.lower()
+	return (dataset_file,random_edgeweight_generation,solver)
 
 def _map_cluster(cluster,id2vertex):
 	return {id2vertex[u] for u in cluster}
@@ -85,7 +88,7 @@ def _vertex_pair_ids(n):
 			id += 1
 	return id2vertexpair
 
-def _linear_program(num_vertices,edges,graph):
+def _linear_program_scipy(num_vertices,edges,graph):
 	vertex_pairs = int(num_vertices*(num_vertices-1)/2)
 	A = []
 	for i in range(num_vertices-2):
@@ -111,6 +114,57 @@ def _linear_program(num_vertices,edges,graph):
 			else: #(u,v) \in E^+
 				c[uv] = (wp-wn)
 	return (A,b,c)
+
+def _solve_lp_scipy(A,b,c):
+	from scipy.optimize import linprog
+	lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)])
+	lp_var_assignment = lp_solution['x']
+	for i in range(len(lp_var_assignment)):
+		if lp_var_assignment[i] < 0:
+			lp_var_assignment[i] = 0
+		elif lp_var_assignment[i] > 1:
+			lp_var_assignment[i] = 1
+	return lp_var_assignment
+
+def _linear_program_pulp(num_vertices,edges,graph):
+	#see https://medium.com/opex-analytics/optimization-modeling-in-python-pulp-gurobi-and-cplex-83a62129807a
+	opt_model = plp.LpProblem(name='GeneralWeightedCC')
+	vertex_pairs = int(num_vertices*(num_vertices-1)/2)
+
+	x_vars  = {i: plp.LpVariable(cat=plp.LpContinuous, lowBound=0, upBound=1, name='x_{0}'.format(i)) for i in range(vertex_pairs)}
+
+	c_count = 0
+	constraints = {}
+	for i in range(num_vertices-2):
+		for j in range(i+1,num_vertices-1):
+			for k in range(j+1,num_vertices):
+				#xij + xjk >= xik  <=>  xik - xij - xjk <= 0
+				ik = _vertex_pair_id(i,k,num_vertices)
+				ij = _vertex_pair_id(i,j,num_vertices)
+				jk = _vertex_pair_id(j,k,num_vertices)
+				expr = plp.LpAffineExpression([(x_vars[ik],1), (x_vars[ij],-1), (x_vars[jk],-1)])
+				constraints[c_count] = opt_model.addConstraint(plp.LpConstraint(e=expr,sense=plp.LpConstraintLE,rhs=0,name='constraint_{0}'.format(c_count)))
+				c_count += 1
+
+	obj_expr = []
+	for (u,v) in edges:
+		uv = _vertex_pair_id(u,v,num_vertices)
+		(wp,wn) = graph[u][v]
+		if wp != wn:
+			if wp < wn: #(u,v) \in E^-
+				obj_expr.append(-(wn-wp)*x_vars[uv])
+			else: #(u,v) \in E^+
+				obj_expr.append((wn-wp)*x_vars[uv])
+	objective = plp.lpSum(obj_expr)
+
+	opt_model.sense = plp.LpMinimize
+	opt_model.setObjective(objective)
+
+	return opt_model
+
+def _solve_lp_pulp(model):
+	status = model.solve()
+	return status
 
 def _sorted_distances(u,valid_vertices,num_vertices,x):
 	du = []
@@ -271,7 +325,7 @@ def _max_edgeweight_gap(graph):
 
 if __name__ == '__main__':
 	#read parameters
-	(dataset_file,random_edgeweight_generation) = _read_params()
+	(dataset_file,random_edgeweight_generation,solver) = _read_params()
 
 	#load dataset
 	print(separator)
@@ -294,6 +348,7 @@ if __name__ == '__main__':
 	max_edgeweight_gap = _max_edgeweight_gap(graph)
 	print('Global condition (without tot_min): %f >= %f ?' %(all_edgeweights_sum/vertex_pairs,max_edgeweight_gap))
 	print('Global condition (including tot_min): %f >= %f ?' %((all_edgeweights_sum+tot_min)/vertex_pairs,max_edgeweight_gap))
+	print('Solver: %s' %(solver))
 
 	#baseline CC costs
 	print(separator)
@@ -320,10 +375,19 @@ if __name__ == '__main__':
 
 	#build linear program
 	print(separator)
-	print('O(log n)-approximation algorithm - Building linear program...')
+	print('O(log n)-approximation algorithm - Building linear program (solver: %s)...' %(solver))
 	start = time.time()
 	id2vertexpair = _vertex_pair_ids(n)
-	(A,b,c) = _linear_program(n,edges,graph)
+	model = None
+	A = None
+	b = None
+	c = None
+	if solver == 'pulp':
+		model = _linear_program_pulp(n,edges,graph)
+	elif solver == 'scipy':
+		(A,b,c) = _linear_program_scipy(n,edges,graph)
+	else:
+		raise Exception('Solver \'%s\' not supported' %(solver))
 	runtime = _running_time_ms(start)
 	c_nonzero = len([x for x in c if x != 0])
 	print('Linear program successfully built in %d ms' %(runtime))
@@ -333,16 +397,16 @@ if __name__ == '__main__':
 
 	#solving linear program
 	print(separator)
-	print('O(log n)-approximation algorithm - Solving linear program...')
+	print('O(log n)-approximation algorithm - Solving linear program (solver: %s)...' %(solver))
 	start=time.time()
-	lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)])
+	lp_var_assignment = None
+	if solver == 'pulp':
+		lp_var_assignment = _solve_lp_pulp(model)
+	elif solver == 'scipy':
+		lp_var_assignment = _solve_lp_scipy(A,b,c)
+	else:
+		raise Exception('Solver \'%s\' not supported' %(solver))
 	runtime = _running_time_ms(start)
-	lp_var_assignment = lp_solution['x']
-	for i in range(len(lp_var_assignment)):
-		if lp_var_assignment[i] < 0:
-			lp_var_assignment[i] = 0
-		elif lp_var_assignment[i] > 1:
-			lp_var_assignment[i] = 1
 	print('Linear program successfully solved in %d ms' %(runtime))
 	print('size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
 
