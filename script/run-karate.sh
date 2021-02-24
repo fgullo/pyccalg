@@ -1,0 +1,1 @@
+python ./src/ologncc.py -d ./data/karate.tsv -r 20,23 >./results/karate.txt
