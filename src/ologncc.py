@@ -2,13 +2,12 @@ import os, sys, getopt, time
 from scipy.optimize import linprog
 
 separator = '---------------'
-weight_ub = 23
-weight_lb = 20
 
 def _running_time_ms(start):
 	return int(round((time.time()-start)*1000))
 
-def _load(dataset_path):
+def _load(dataset_path,random_edgeweight_generation):
+	import random
 	with open(dataset_path) as f:
 		tot_min = 0
 		id2vertex = {}
@@ -20,11 +19,13 @@ def _load(dataset_path):
 			tokens = line.split()
 			u = int(tokens[0])
 			v = int(tokens[1])
-			#wp = float(tokens[2])
-			#wn = float(tokens[3])
-			import random
-			wp = random.uniform(weight_lb,weight_ub)
-			wn = random.uniform(weight_lb,weight_ub)
+			if random_edgeweight_generation:
+				import random
+				wp = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
+				wn = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
+			else:
+				wp = float(tokens[2])
+				wn = float(tokens[3])
 			if wp != wn:
 				if u not in vertex2id:
 					vertex2id[u] = vertex_id
@@ -52,17 +53,20 @@ def _load(dataset_path):
 
 def _read_params():
 	dataset_file = None
-	short_params = 'd:'
-	long_params = ['dataset=']
+	random_edgeweight_generation = None
+	short_params = 'd:r:'
+	long_params = ['dataset=','random=']
 	try:
 		arguments, values = getopt.getopt(sys.argv[1:], short_params, long_params)
 	except getopt.error as err:
-		print('ologncc.py -d <dataset_file>')
+		print('ologncc.py -d <dataset_file> [-r <rnd_edge_weight_LB,rnd_edge_weight_UB>]')
 		sys.exit(2)
 	for arg, value in arguments:
 		if arg in ('-d', '--dataset'):
 			dataset_file = value
-	return dataset_file
+		elif arg in ('-r', '--random'):
+			random_edgeweight_generation = [float(x) for x in value.split(',')]
+	return (dataset_file,random_edgeweight_generation)
 
 def _map_cluster(cluster,id2vertex):
 	return {id2vertex[u] for u in cluster}
@@ -267,13 +271,13 @@ def _max_edgeweight_gap(graph):
 
 if __name__ == '__main__':
 	#read parameters
-	dataset_file = _read_params()
+	(dataset_file,random_edgeweight_generation) = _read_params()
 
 	#load dataset
 	print(separator)
 	print('Loading dataset \'%s\'...' %(dataset_file))
 	start = time.time()
-	(id2vertex,vertex2id,edges,graph,tot_min) = _load(dataset_file)
+	(id2vertex,vertex2id,edges,graph,tot_min) = _load(dataset_file,random_edgeweight_generation)
 	runtime = _running_time_ms(start)
 	n = len(id2vertex)
 	m = len(edges)
@@ -284,6 +288,8 @@ if __name__ == '__main__':
 	print('#edges: %d' %(m))
 	print('#vertex pairs: %d' %(vertex_pairs))
 	print('#vertex triples: %d' %(vertex_triples))
+	if random_edgeweight_generation:
+		print('Edge weights randomly generated from [%s,%s]' %(random_edgeweight_generation[0],random_edgeweight_generation[1]))
 	all_edgeweights_sum = _all_edgeweights_sum(graph)
 	max_edgeweight_gap = _max_edgeweight_gap(graph)
 	print('Global condition (without tot_min): %f >= %f ?' %(all_edgeweights_sum/vertex_pairs,max_edgeweight_gap))
