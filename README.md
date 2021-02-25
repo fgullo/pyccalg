@@ -7,7 +7,8 @@ Specifically, an implementation of the (linear-programming + region-growing) O(l
 
 * [`SciPy`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html)`v1.6` (or higher) and/or [`PuLP`](https://pypi.org/project/PuLP/)
 * `SciPy linprog` comes with various solvers: '*Method `highs-ds` is a wrapper of the C++ high performance dual revised simplex implementation (HSOL). Method `highs-ipm` is a wrapper of a C++ implementation of an interior-point method; it features a crossover routine, so it is as accurate as a simplex solver. Method `highs` chooses between the two automatically. For new code involving linprog, we recommend explicitly choosing one of these three method values instead of `interior-point` (default), `revised simplex`, and `simplex` (legacy)*'. See [here](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html) for more details.
-* `PuLP` comes with two solvers by default: [CBC](https://projects.coin-or.org/Cbc) (linear and integer programming) and [CHOCO](https://choco-solver.org/) (constraint programming), but it can connect to many others (e.g., `GUROBI`, `CPLEX`, `SCIP`, `MIPCL`, `XPRESS`, `GLPK9`) if you have them installed
+* `PuLP` comes with two solvers by default: [`CBC`](https://projects.coin-or.org/Cbc) (linear and integer programming) and [`CHOCO`](https://choco-solver.org/) (constraint programming), but it can connect to many others (e.g., `GUROBI`, `CPLEX`, `SCIP`, `MIPCL`, `XPRESS`, `GLPK9`) if you have them installed
+* Here with use `highs-ipm` with `SciPy linprog` and the default `CBC` with `PuLP` 
 * However, any linear-programming `Python`  (other than `SciPy linprog` or `PuLP`) library can alternatively be used with minimal adaption
 
 ### Usage:
