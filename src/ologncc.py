@@ -91,18 +91,47 @@ def _vertex_pair_ids(n):
 def _linear_program_scipy(num_vertices,edges,graph):
 	vertex_pairs = int(num_vertices*(num_vertices-1)/2)
 	A = []
+	"""
 	for i in range(num_vertices-2):
 		for j in range(i+1,num_vertices-1):
 			for k in range(j+1,num_vertices):
-				#xij + xjk >= xik  <=>  xik - xij - xjk <= 0
-				a = [0]*vertex_pairs
 				ik = _vertex_pair_id(i,k,num_vertices)
 				ij = _vertex_pair_id(i,j,num_vertices)
 				jk = _vertex_pair_id(j,k,num_vertices)
+				#for all i,j,k, 3 triangle-inequality constraints should be stated:
+				#First triangle-inequality constraint: xik <= xij + xjk <=> xik - xij - xjk = 0
+				a = [0]*vertex_pairs
 				a[ik] = 1
 				a[ij] = -1
 				a[jk] = -1
 				A.append(a)
+				#Second triangle-inequality constraint: xij <= xik + xjk <=> xij - xik - xjk = 0
+				a = [0]*vertex_pairs
+				a[ij] = 1
+				a[ik] = -1
+				a[jk] = -1
+				A.append(a)
+				#Third triangle-inequality constraint: xjk <= xij + xik <=> xjk - xij - xik = 0
+				a = [0]*vertex_pairs
+				a[jk] = 1
+				a[ij] = -1
+				a[ik] = -1
+				A.append(a)
+	"""
+	for i in range(num_vertices-1):
+		for j in range(i+1,num_vertices):
+			ij = _vertex_pair_id(i,j,num_vertices)
+			for k in range(num_vertices):
+				if k != i and k != j:
+					ik = _vertex_pair_id(i,k,num_vertices)
+					kj = _vertex_pair_id(k,j,num_vertices)
+					#for all vertex pairs {i,j} and all vertices k \notin {i,j}, state the following triangle-inequality constraint:
+					# xij <= xik + xkj <=> xij - xik - xkj = 0
+					a = [0]*vertex_pairs
+					a[ij] = 1
+					a[ik] = -1
+					a[kj] = -1
+					A.append(a)
 	b = [0]*len(A)
 	c = [0]*vertex_pairs
 	for (u,v) in edges:
@@ -116,8 +145,18 @@ def _linear_program_scipy(num_vertices,edges,graph):
 	return (A,b,c)
 
 def _solve_lp_scipy(A,b,c):
+	#notes on supported solvers (see https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html)
+	#Method ‘highs-ds’ is a wrapper of the C++ high performance dual revised simplex implementation (HSOL) [13], [14].
+	#Method ‘highs-ipm’ is a wrapper of a C++ implementation of an interior-point method [13];
+	#it features a crossover routine, so it is as accurate as a simplex solver.
+	#Method ‘highs’ chooses between the two automatically.
+	#For new code involving linprog, we recommend explicitly choosing one of these three method values
+	#instead of ‘interior-point’ (default), ‘revised simplex’, and ‘simplex’ (legacy).
 	from scipy.optimize import linprog
-	lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)])
+	#lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)])
+	#lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)], method='simplex')
+	lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)], method='highs-ipm')
+	#lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)], method='highs')
 	lp_var_assignment = lp_solution['x']
 	for i in range(len(lp_var_assignment)):
 		if lp_var_assignment[i] < 0:
@@ -131,20 +170,37 @@ def _linear_program_pulp(num_vertices,edges,graph):
 	opt_model = plp.LpProblem(name='GeneralWeightedCC')
 	vertex_pairs = int(num_vertices*(num_vertices-1)/2)
 
-	x_vars  = {i: plp.LpVariable(cat=plp.LpContinuous, lowBound=0, upBound=10, name='x_{0}'.format(i)) for i in range(vertex_pairs)}
+	x_vars  = {i: plp.LpVariable(cat=plp.LpContinuous, lowBound=0, upBound=1, name='x_{0}'.format(i)) for i in range(vertex_pairs)}
 
 	c_count = 0
 	constraints = {}
+	"""
 	for i in range(num_vertices-2):
 		for j in range(i+1,num_vertices-1):
 			for k in range(j+1,num_vertices):
-				#xij + xjk >= xik  <=>  xik - xij - xjk <= 0
 				ik = _vertex_pair_id(i,k,num_vertices)
 				ij = _vertex_pair_id(i,j,num_vertices)
 				jk = _vertex_pair_id(j,k,num_vertices)
-				expr = plp.LpAffineExpression([(x_vars[ik],1), (x_vars[ij],-1), (x_vars[jk],-1)])
-				constraints[c_count] = opt_model.addConstraint(plp.LpConstraint(e=expr,sense=plp.LpConstraintLE,rhs=0,name='constraint_{0}'.format(c_count)))
-				c_count += 1
+				#for all i,j,k, 3 triangle-inequality constraints should be stated:
+				expr1 = plp.LpAffineExpression([(x_vars[ik],1), (x_vars[ij],-1), (x_vars[jk],-1)])#First triangle-inequality constraint: xik <= xij + xjk <=> xik - xij - xjk = 0
+				expr2 = plp.LpAffineExpression([(x_vars[ij],1), (x_vars[ik],-1), (x_vars[jk],-1)])#Second triangle-inequality constraint: xij <= xik + xjk <=> xij - xik - xjk = 0
+				expr3 = plp.LpAffineExpression([(x_vars[jk],1), (x_vars[ij],-1), (x_vars[ik],-1)])#Third triangle-inequality constraint: xjk <= xij + xik <=> xjk - xij - xik = 0
+				for expr in [expr1,expr2,expr3]:
+					constraints[c_count] = opt_model.addConstraint(plp.LpConstraint(e=expr,sense=plp.LpConstraintLE,rhs=0,name='constraint_{0}'.format(c_count)))
+					c_count += 1
+	"""
+	for i in range(num_vertices-1):
+		for j in range(i+1,num_vertices):
+			ij = _vertex_pair_id(i,j,num_vertices)
+			for k in range(num_vertices):
+				if k != i and k != j:
+					ik = _vertex_pair_id(i,k,num_vertices)
+					kj = _vertex_pair_id(k,j,num_vertices)
+					#for all vertex pairs {i,j} and all vertices k \notin {i,j}, state the following triangle-inequality constraint:
+					# xij <= xik + xkj <=> xij - xik - xkj = 0
+					expr = plp.LpAffineExpression([(x_vars[ij],1), (x_vars[ik],-1), (x_vars[kj],-1)])
+					constraints[c_count] = opt_model.addConstraint(plp.LpConstraint(e=expr,sense=plp.LpConstraintLE,rhs=0,name='constraint_{0}'.format(c_count)))
+					c_count += 1
 
 	obj_expr = []
 	for (u,v) in edges:
@@ -154,7 +210,7 @@ def _linear_program_pulp(num_vertices,edges,graph):
 			if wp < wn: #(u,v) \in E^-
 				obj_expr.append(-(wn-wp)*x_vars[uv])
 			else: #(u,v) \in E^+
-				obj_expr.append((wn-wp)*x_vars[uv])
+				obj_expr.append((wp-wn)*x_vars[uv])
 	objective = plp.lpSum(obj_expr)
 
 	opt_model.sense = plp.LpMinimize
@@ -163,8 +219,15 @@ def _linear_program_pulp(num_vertices,edges,graph):
 	return opt_model
 
 def _solve_lp_pulp(model):
-	model.solve()
+	#model.solve()
+	#model.solve(solver=plp.PULP_CBC_CMD(fracGap=0.00001))
+	model.solve(solver=plp.PULP_CBC_CMD(msg=False))
 	lp_var_assignment = [x.varValue for x in model.variables()]
+	for i in range(len(lp_var_assignment)):
+		if lp_var_assignment[i] < 0:
+			lp_var_assignment[i] = 0
+		elif lp_var_assignment[i] > 1:
+			lp_var_assignment[i] = 1
 	return lp_var_assignment
 
 def _sorted_distances(u,valid_vertices,num_vertices,x):
@@ -287,22 +350,33 @@ def _kwikcluster(id2vertex,graph):
 
 def _CC_cost(clustering,graph):
 	cost = 0
-
 	vertex2cluster = {}
 	cid = 0
 	for cluster in clustering:
 		for u in cluster:
 			vertex2cluster[u] = cid
 		cid += 1
-
 	for u in graph.keys():
 		for v in graph[u]:
-			(wp,wn) = graph[u][v]
-			if vertex2cluster[u] == vertex2cluster[v]:
-				cost += wn
-			else:
-				cost += wp
+			if u<v:
+				(wp,wn) = graph[u][v]
+				if vertex2cluster[u] == vertex2cluster[v]:
+					cost += wn
+				else:
+					cost += wp
+	return cost
 
+def _lp_solution_cost(lp_var_assignment,graph,num_vertices):
+	cost = 0
+	for u in graph.keys():
+		for v in graph[u]:
+			if u<v:
+				xuv = lp_var_assignment[_vertex_pair_id(u,v,num_vertices)]
+				(wp,wn) = graph[u][v]
+				if wp>wn:
+					cost += wp*xuv
+				else:
+					cost += wn*(1-xuv)
 	return cost
 
 def _all_edgeweights_sum(graph):
@@ -347,16 +421,16 @@ if __name__ == '__main__':
 		print('Edge weights randomly generated from [%s,%s]' %(random_edgeweight_generation[0],random_edgeweight_generation[1]))
 	all_edgeweights_sum = _all_edgeweights_sum(graph)
 	max_edgeweight_gap = _max_edgeweight_gap(graph)
-	print('Global condition (without tot_min): %f >= %f ?' %(all_edgeweights_sum/vertex_pairs,max_edgeweight_gap))
-	print('Global condition (including tot_min): %f >= %f ?' %((all_edgeweights_sum+tot_min)/vertex_pairs,max_edgeweight_gap))
+	print('Global condition (without tot_min): %s >= %s ?' %(all_edgeweights_sum/vertex_pairs,max_edgeweight_gap))
+	print('Global condition (including tot_min): %s >= %s ?' %((all_edgeweights_sum+tot_min)/vertex_pairs,max_edgeweight_gap))
 	print('Solver: %s' %(solver))
 
 	#baseline CC costs
 	print(separator)
 	singlecluster_cost = _CC_cost([set(id2vertex.keys())],graph) + tot_min
 	allsingletons_cost = _CC_cost([{u} for u in id2vertex.keys()],graph) + tot_min
-	print('CC cost of \'whole graph in one cluster\' solution: %f (tot_min: %f)' %(singlecluster_cost,tot_min))
-	print('CC cost of \'all singletons\' solution: %f (tot_min: %f)' %(allsingletons_cost,tot_min))
+	print('CC cost of \'whole graph in one cluster\' solution: %s (tot_min: %s)' %(singlecluster_cost,tot_min))
+	print('CC cost of \'all singletons\' solution: %s (tot_min: %s)' %(allsingletons_cost,tot_min))
 
 	#run KwikCluster algorithm (to have some baseline results)
 	print(separator)
@@ -366,7 +440,7 @@ if __name__ == '__main__':
 	runtime = _running_time_ms(start)
 	print('KwikCluster algorithm successfully executed in %d ms' %(runtime))
 	kc_cost = _CC_cost(kc_clustering,graph) + tot_min
-	print('CC cost of KwikCluster\'s output clustering: %f (tot_min: %f)' %(kc_cost,tot_min))
+	print('CC cost of KwikCluster\'s output clustering: %s (tot_min: %s)' %(kc_cost,tot_min))
 	print('KwikCluster\'s output clustering:')
 	c = 1
 	for cluster in kc_clustering:
@@ -394,9 +468,9 @@ if __name__ == '__main__':
 	runtime = _running_time_ms(start)
 	print('Linear program successfully built in %d ms' %(runtime))
 	if solver == 'scipy':
-		print('#variables: %d (must be equal to #vertex pairs)' %(len(c)))
-		print('#inequality constraints: %d (must be equal to #vertex triples)' %(len(A)))
-		print('#non-zero entries in cost vector: %d (must be <= #edges)' %(c_nonzero))
+		print('#variables: %d (must be equal to #vertex pairs, i.e., equal to %d)' %(len(c),vertex_pairs))
+		print('#inequality constraints: %d (must be equal to 3 * #vertex triples, i.e., equal to %d)' %(len(A),3*vertex_triples))
+		print('#non-zero entries in cost vector: %d (must be <= #edges, i.e., <= %d)' %(c_nonzero,m))
 
 	#solving linear program
 	print(separator)
@@ -414,8 +488,10 @@ if __name__ == '__main__':
 	#DEBUG
 	print(lp_var_assignment)
 	#########
+	lp_cost = _lp_solution_cost(lp_var_assignment,graph,n) + tot_min
 	print('Linear program successfully solved in %d ms' %(runtime))
-	print('size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
+	print('Size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
+	print('Cost of the LP solution: %s (tot_min: %s)' %(lp_cost,tot_min))
 
 	#rounding lp solution
 	print(separator)
@@ -425,8 +501,8 @@ if __name__ == '__main__':
 	clustering = _round(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
 	runtime = _running_time_ms(start)
 	print('LP-rounding successfully performed in %d ms' %(runtime))
-	cost = _CC_cost(clustering,graph) + tot_min
-	print('CC cost of O(log n)-approximation algorithm\'s output clustering: %f (tot_min: %f)' %(cost,tot_min))
+	cc_cost = _CC_cost(clustering,graph) + tot_min
+	print('CC cost of O(log n)-approximation algorithm\'s output clustering: %s (tot_min: %s)' %(cc_cost,tot_min))
 	print('O(log n)-approximation algorithm\'s output clustering:')
 	c = 1
 	for cluster in clustering:
