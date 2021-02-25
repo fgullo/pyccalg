@@ -54,7 +54,7 @@ def _load(dataset_path,random_edgeweight_generation):
 def _read_params():
 	dataset_file = None
 	random_edgeweight_generation = None
-	solver = 'pulp'
+	solver = 'scipy'
 	short_params = 'd:r:s:'
 	long_params = ['dataset=','random=','solver=']
 	try:
@@ -92,6 +92,7 @@ def _linear_program_scipy(num_vertices,edges,graph):
 	vertex_pairs = int(num_vertices*(num_vertices-1)/2)
 	A = []
 	"""
+	#old way of generating triangle-inequality constraints (deprecated as more elaborated and confusing, though still correct)
 	for i in range(num_vertices-2):
 		for j in range(i+1,num_vertices-1):
 			for k in range(j+1,num_vertices):
@@ -158,12 +159,13 @@ def _solve_lp_scipy(A,b,c):
 	lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)], method='highs-ipm')
 	#lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)], method='highs')
 	lp_var_assignment = lp_solution['x']
+	obj_value = lp_solution['fun']
 	for i in range(len(lp_var_assignment)):
 		if lp_var_assignment[i] < 0:
 			lp_var_assignment[i] = 0
 		elif lp_var_assignment[i] > 1:
 			lp_var_assignment[i] = 1
-	return lp_var_assignment
+	return (lp_var_assignment,obj_value)
 
 def _linear_program_pulp(num_vertices,edges,graph):
 	#see https://medium.com/opex-analytics/optimization-modeling-in-python-pulp-gurobi-and-cplex-83a62129807a
@@ -175,6 +177,7 @@ def _linear_program_pulp(num_vertices,edges,graph):
 	c_count = 0
 	constraints = {}
 	"""
+	#old way of generating triangle-inequality constraints (deprecated as more elaborated and confusing, though still correct)
 	for i in range(num_vertices-2):
 		for j in range(i+1,num_vertices-1):
 			for k in range(j+1,num_vertices):
@@ -199,7 +202,9 @@ def _linear_program_pulp(num_vertices,edges,graph):
 					#for all vertex pairs {i,j} and all vertices k \notin {i,j}, state the following triangle-inequality constraint:
 					# xij <= xik + xkj <=> xij - xik - xkj = 0
 					expr = plp.LpAffineExpression([(x_vars[ij],1), (x_vars[ik],-1), (x_vars[kj],-1)])
-					constraints[c_count] = opt_model.addConstraint(plp.LpConstraint(e=expr,sense=plp.LpConstraintLE,rhs=0,name='constraint_{0}'.format(c_count)))
+					constraint = plp.LpConstraint(e=expr,sense=plp.LpConstraintLE,rhs=0,name='constraint_{0}'.format(c_count))
+					constraints[c_count] = constraint
+					opt_model.addConstraint(constraint)
 					c_count += 1
 
 	obj_expr = []
@@ -216,19 +221,43 @@ def _linear_program_pulp(num_vertices,edges,graph):
 	opt_model.sense = plp.LpMinimize
 	opt_model.setObjective(objective)
 
+	"""
+	#######################
+	#######################
+	#######################
+	## DEBUG:
+	(A,b,c) = _linear_program_scipy(num_vertices,edges,graph)
+	checkA = _check_constraint_correspondence(A,constraints)
+	if not checkA:
+		raise Exception('No constraint correspondence')
+
+	checkc = _check_objective_correspondence(c,objective)
+	if not checkc:
+		raise Exception('No objective correspondence')
+	#######################
+	#######################
+	#######################
+	"""
+
 	return opt_model
 
 def _solve_lp_pulp(model):
 	#model.solve()
 	#model.solve(solver=plp.PULP_CBC_CMD(fracGap=0.00001))
 	model.solve(solver=plp.PULP_CBC_CMD(msg=False))
-	lp_var_assignment = [x.varValue for x in model.variables()]
+	#lp_var_assignment = [x.varValue for x in model.variables()]
+	lp_var_assignment = [0]*len(model.variables())
+	for var in model.variables():
+		varname = var.name
+		varindex = int(varname.split('_')[1])
+		lp_var_assignment[varindex] = var.varValue
+	obj_value = model.objective.value()
 	for i in range(len(lp_var_assignment)):
 		if lp_var_assignment[i] < 0:
 			lp_var_assignment[i] = 0
 		elif lp_var_assignment[i] > 1:
 			lp_var_assignment[i] = 1
-	return lp_var_assignment
+	return (lp_var_assignment,obj_value)
 
 def _sorted_distances(u,valid_vertices,num_vertices,x):
 	du = []
@@ -309,15 +338,19 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 				ball.update(new_ball_vertices)
 				vol = _vol(ball,remaining_vertices,graph,n,x,r)#cannot be done incrementally as r changes in every iteration, so all vertices in current ball must be visited again
 				"""
-				#####################
-				#DEBUG
+				#######################
+				#######################
+				#######################
+				## DEBUG:
 				cut_check = _cut(ball,remaining_vertices,graph)
 				#cut = cut_check
 				tolerance = 0.0000000001
 				if abs(cut-cut_check) > tolerance:
 					print('ERROR! cut incremental: %s, cut from scratch: %s' %(str(cut),str(cut_check)))
 					sys.exit()
-				#####################
+				#######################
+				#######################
+				#######################
 				"""
 				du = du[i:]
 			clusters.append(ball)
@@ -389,6 +422,16 @@ def _all_edgeweights_sum(graph):
 				sum += wn
 	return sum
 
+def _all_negativeedgeweight_sum(graph):
+	sum = 0
+	for u in graph.keys():
+		for v in graph[u]:
+			if u<v:
+				(wp,wn) = graph[u][v]
+				if wn>wp:
+					sum += wn
+	return sum
+
 def _max_edgeweight_gap(graph):
 	maxgap = 0
 	for u in graph.keys():
@@ -397,6 +440,78 @@ def _max_edgeweight_gap(graph):
 				(wp,wn) = graph[u][v]
 				maxgap = max(maxgap,abs(wp-wn))
 	return maxgap
+
+#for DEBUG
+def _check_constraint_correspondence(A,c_dict):
+	if len(A) != len(c_dict):
+		return False
+
+	for i in range(len(A)):
+		v = A[i]
+		posA = [j for j in range(len(v)) if v[j] == 1]
+		if len(posA) != 1:
+			raise Exception('Malformed constraint on \'A\'')
+		negA = [j for j in range(len(v)) if v[j] == -1]
+		if len(negA) != 2:
+			raise Exception('Malformed constraint on \'A\'')
+
+		c = c_dict[i]
+		cs = str(c)[:-5].replace('- ','-').replace('+ ','')
+		monomials = cs.split()
+		#print(monomials)
+		#print(cs)
+		posc = [int(s.split('_')[1]) for s in monomials if s[0] != '-']
+		if len(posc) != 1:
+			print(i)
+			print('Malformed constraint on \'c\'---c: ' + str(c))
+			raise Exception('Malformed constraint on \'c\'---c: ' + str(c))
+		negc = [int(s.split('_')[1]) for s in monomials if s[0] == '-']
+		if len(negc) != 2:
+			print(i)
+			print(negc)
+			print('Malformed constraint on \'c\'---c: ' + str(c))
+			raise Exception('Malformed constraint on \'c\'---c: ' + str(c))
+
+		if posA[0] != posc[0] or set(negA) != set(negc):
+			return False
+
+	return True
+
+#for DEBUG
+def _check_objective_correspondence(c,objective):
+	objective_tokens = str(objective).replace('- ','-').replace('+ ','+').split()
+	monomials = {}
+	for s in objective_tokens:
+		s_tokens = s.split('*')
+		coeff = float(s_tokens[0])
+		var_index = int(s_tokens[1].split('_')[1])
+		monomials[var_index] = coeff
+
+	for i in range(len(c)):
+		if c[i] == 0 and i in monomials.keys() and monomials[i] != 0:
+			return False
+		if c[i] != 0 and (i not in monomials.keys() or monomials[i] != c[i]):
+			return False
+
+	return True
+
+#for DEBUG
+def _check_clustering(clustering,num_vertices):
+	vertex2cluster = {}
+	cid = 0
+	for cluster in clustering:
+		for u in cluster:
+			if u not in vertex2cluster:
+				vertex2cluster[u] = set()
+			vertex2cluster[u].add(cid)
+		cid += 1
+
+	for u in range(num_vertices):
+		if u not in vertex2cluster or len(vertex2cluster[u]) != 1:
+			return False
+
+	return True
+
 
 if __name__ == '__main__':
 	#read parameters
@@ -438,6 +553,9 @@ if __name__ == '__main__':
 	start = time.time()
 	kc_clustering = _kwikcluster(id2vertex,graph)
 	runtime = _running_time_ms(start)
+	check_clustering = _check_clustering(kc_clustering,n)
+	if not check_clustering:
+		raise Exception('ERROR: malformed clustering')
 	print('KwikCluster algorithm successfully executed in %d ms' %(runtime))
 	kc_cost = _CC_cost(kc_clustering,graph) + tot_min
 	print('CC cost of KwikCluster\'s output clustering: %s (tot_min: %s)' %(kc_cost,tot_min))
@@ -477,21 +595,46 @@ if __name__ == '__main__':
 	print('O(log n)-approximation algorithm - Solving linear program (solver: %s)...' %(solver))
 	start=time.time()
 	lp_var_assignment = None
+	obj_value = None
+	method = ''
 	if solver == 'pulp':
-		lp_var_assignment = _solve_lp_pulp(model)
+		method = 'PuLP'
+		(lp_var_assignment,obj_value) = _solve_lp_pulp(model)
 	elif solver == 'scipy':
-		lp_var_assignment = _solve_lp_scipy(A,b,c)
+		method = 'SciPy'
+		(lp_var_assignment,obj_value) = _solve_lp_scipy(A,b,c)
 	else:
 		raise Exception('Solver \'%s\' not supported' %(solver))
 	runtime = _running_time_ms(start)
-	#########
-	#DEBUG
-	print(lp_var_assignment)
-	#########
 	lp_cost = _lp_solution_cost(lp_var_assignment,graph,n) + tot_min
 	print('Linear program successfully solved in %d ms' %(runtime))
 	print('Size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
 	print('Cost of the LP solution: %s (tot_min: %s)' %(lp_cost,tot_min))
+	all_negativeedgeweight_sum = _all_negativeedgeweight_sum(graph)
+	print('Cost of the LP solution (according to %s): %s (tot_min: %s)' %(method,obj_value+all_negativeedgeweight_sum+tot_min,tot_min))
+	"""
+	#######################
+	#######################
+	#######################
+	## DEBUG:
+	if solver == 'pulp':
+		(A,b,c) = _linear_program_scipy(n,edges,graph)
+		(lp_var_assignment_scipy,obj_value_scipy) = _solve_lp_scipy(A,b,c)
+		lp_cost_scipy = _lp_solution_cost(lp_var_assignment_scipy,graph,n) + tot_min
+		print('Cost of the SciPy LP solution: %s (tot_min: %s)' %(lp_cost_scipy,tot_min))
+		print('Cost of the SciPy LP solution (according to SciPy): %s (tot_min: %s)' %(obj_value_scipy+all_negativeedgeweight_sum+tot_min,tot_min))
+		for i in range(len(lp_var_assignment)):
+			scipy_val = lp_var_assignment_scipy[i]
+			pulp_val = lp_var_assignment[i]
+			diff = abs(scipy_val-pulp_val)
+			pedix = '(difference: ' + str(diff) + ')' if diff>0 else ''
+			print('x_%d (SciPy, PuLP): %s %s %s' %(i,scipy_val,pulp_val,pedix))
+	else:
+		print(lp_var_assignment)
+	#######################
+	#######################
+	#######################
+	"""
 
 	#rounding lp solution
 	print(separator)
@@ -500,6 +643,9 @@ if __name__ == '__main__':
 	start=time.time()
 	clustering = _round(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
 	runtime = _running_time_ms(start)
+	check_clustering = _check_clustering(clustering,n)
+	if not check_clustering:
+		raise Exception('ERROR: malformed clustering')
 	print('LP-rounding successfully performed in %d ms' %(runtime))
 	cc_cost = _CC_cost(clustering,graph) + tot_min
 	print('CC cost of O(log n)-approximation algorithm\'s output clustering: %s (tot_min: %s)' %(cc_cost,tot_min))
