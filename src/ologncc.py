@@ -358,24 +358,32 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 			for (v,d) in du[0:i]:
 				ball.add(v)
 			cut = _cut(ball,remaining_vertices,graph)
-			vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,0)
+			#vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,1/const)
 			du = du[i:]
 
 			while du:
-				r = min(1/const,du[0][1]) #minimum distance in du
+				r = min(1/const,du[0][1]) #du[0][1]: minimum distance in du
 				i = 0
 				while i<len(du) and du[i][1]<=r:
 					i += 1
 				new_ball_vertices = {v for (v,d) in du[0:i]}
-				cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut of the possible new ball, computed incrementally
+				cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut can be computed incrementally
 				ball.update(new_ball_vertices)
-				vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,r) #vol of the possible new ball; it is not convenient to compute it incrementally as r changes in every iteration, so all vertices in current ball must be visited again anywayy
+				vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,r) #it is not convenient to compute vol incrementally as r changes in every iteration, so the vertices in the current ball must be all visited again anyway
 				du = du[i:]
+				"""
+				if i>0: #it means 'new_ball_vertices' is not empty
+					#cut and vol of the new ball; they are updated only if the ball has grown
+					cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut can be computed incrementally
+					ball.update(new_ball_vertices)
+					vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,r)  #it is not convenient to compute vol incrementally as r changes in every iteration, so the vertices in the current ball must be all visited again anyway
+					du = du[i:]
+				"""
 
-				if not new_ball_vertices or cut <= const*log(n+1)*vol: #'log' returns natural logarithm
-					if not new_ball_vertices and cut > const*log(n+1)*vol:
-						raise Exception('ERROR: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
-						#print('WARNING: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
+				if i==0 or cut <= const*log(n+1)*vol: #'log' returns natural logarithm
+					if i==0 and cut > const*log(n+1)*vol:
+						#raise Exception('ERROR: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
+						print('WARNING: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
 					break
 				"""
 				#######################
