@@ -20,12 +20,13 @@ def _load(dataset_path,random_edgeweight_generation):
 			u = int(tokens[0])
 			v = int(tokens[1])
 			if random_edgeweight_generation:
-				import random
 				wp = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
 				wn = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
 			else:
 				wp = float(tokens[2])
 				wn = float(tokens[3])
+				#wp = 1.0
+				#wn = 0.0
 			if wp != wn:
 				if u not in vertex2id:
 					vertex2id[u] = vertex_id
@@ -49,6 +50,20 @@ def _load(dataset_path,random_edgeweight_generation):
 				tot_min += min_pn
 				graph[uid][vid] = (wp-min_pn,wn-min_pn)
 				graph[vid][uid] = (wp-min_pn,wn-min_pn)
+
+		if random_edgeweight_generation:
+			#generate weights for non-existing edges (with uniform probability)
+			for uid in graph.keys():
+				for vid in id2vertex.keys():
+					if uid<vid and vid not in graph[u] and random.random()>=0.5:
+						wp = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
+						wn = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
+						min_pn = min(wp,wn)
+						tot_min += min_pn
+						graph[uid][vid] = (wp-min_pn,wn-min_pn)
+						graph[vid][uid] = (wp-min_pn,wn-min_pn)
+						edges.append((uid,vid))
+
 		return (id2vertex,vertex2id,edges,graph,tot_min)
 
 def _read_params():
@@ -328,12 +343,12 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 	remaining_vertices = set(id2vertex.keys())
 	shuffled_vertices = list(id2vertex.keys())
 	random.shuffle(shuffled_vertices)
-	#F = _vol_whole_graph(graph,n,x)
+	F = _vol_whole_graph(graph,n,x)
 
 	for u in shuffled_vertices:
 		if u in remaining_vertices:
 			du = _sorted_distances(u,remaining_vertices,n,x)
-			#vol = F/n #default initial volume of a ball; while it is defined in the paper, it is just a technicality; the herein implementation allows for avoiding it
+			initial_vol = F/n #default initial volume of a ball; while it is defined in the paper, it is just a technicality; the herein implementation allows for avoiding it
 
 			#initial ball is composed of all vertices at distance 0 from u
 			ball = {u}
@@ -343,24 +358,24 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 			for (v,d) in du[0:i]:
 				ball.add(v)
 			cut = _cut(ball,remaining_vertices,graph)
+			vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,0)
 			du = du[i:]
 
 			while du:
-				#grow r and compute cut and vol of the possible new ball
-				r = du[0][1] #minimum distance in du
+				r = min(1/const,du[0][1]) #minimum distance in du
 				i = 0
 				while i<len(du) and du[i][1]<=r:
 					i += 1
 				new_ball_vertices = {v for (v,d) in du[0:i]}
 				cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut of the possible new ball, computed incrementally
 				ball.update(new_ball_vertices)
-				vol = _vol(u,ball,remaining_vertices,graph,n,x,r) #vol of the possible new ball; it is not convenient to compute it incrementally as r changes in every iteration, so all vertices in current ball must be visited again anywayy
+				vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,r) #vol of the possible new ball; it is not convenient to compute it incrementally as r changes in every iteration, so all vertices in current ball must be visited again anywayy
 				du = du[i:]
 
-				if cut <= const*log(n+1)*vol: #'log' returns natural logarithm
-					#'roll-back' to the previous ball and exit the loop
-					for v in new_ball_vertices:
-						ball.remove(v)
+				if not new_ball_vertices or cut <= const*log(n+1)*vol: #'log' returns natural logarithm
+					if not new_ball_vertices and cut > const*log(n+1)*vol:
+						raise Exception('ERROR: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
+						#print('WARNING: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
 					break
 				"""
 				#######################
@@ -569,8 +584,8 @@ if __name__ == '__main__':
 	print(separator)
 	singlecluster_cost = _CC_cost([set(id2vertex.keys())],graph) + tot_min
 	allsingletons_cost = _CC_cost([{u} for u in id2vertex.keys()],graph) + tot_min
-	print('CC cost of \'whole graph in one cluster\' solution: %s (tot_min: %s)' %(singlecluster_cost,tot_min))
-	print('CC cost of \'all singletons\' solution: %s (tot_min: %s)' %(allsingletons_cost,tot_min))
+	print('CC cost of \'whole graph in one cluster\' solution: %s (tot_min: %s, cost-tot_min: %s)' %(singlecluster_cost,tot_min,singlecluster_cost-tot_min))
+	print('CC cost of \'all singletons\' solution: %s (tot_min: %s, cost-tot_min: %s)' %(allsingletons_cost,tot_min,allsingletons_cost-tot_min))
 
 	#run KwikCluster algorithm (to have some baseline results)
 	print(separator)
@@ -583,7 +598,7 @@ if __name__ == '__main__':
 		raise Exception('ERROR: malformed clustering')
 	print('KwikCluster algorithm successfully executed in %d ms' %(runtime))
 	kc_cost = _CC_cost(kc_clustering,graph) + tot_min
-	print('CC cost of KwikCluster\'s output clustering: %s (tot_min: %s)' %(kc_cost,tot_min))
+	print('CC cost of KwikCluster\'s output clustering: %s (tot_min: %s, cost-tot_min: %s)' %(kc_cost,tot_min,kc_cost-tot_min))
 	print('KwikCluster\'s output clustering:')
 	c = 1
 	for cluster in kc_clustering:
@@ -634,9 +649,9 @@ if __name__ == '__main__':
 	lp_cost = _lp_solution_cost(lp_var_assignment,graph,n) + tot_min
 	print('Linear program successfully solved in %d ms' %(runtime))
 	print('Size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
-	print('Cost of the LP solution: %s (tot_min: %s)' %(lp_cost,tot_min))
+	print('Cost of the LP solution: %s (tot_min: %s, cost-tot_min: %s)' %(lp_cost,tot_min,lp_cost-tot_min))
 	all_negativeedgeweight_sum = _all_negativeedgeweight_sum(graph)
-	print('Cost of the LP solution (according to %s): %s (tot_min: %s)' %(method,obj_value+all_negativeedgeweight_sum+tot_min,tot_min))
+	print('Cost of the LP solution (according to %s): %s (tot_min: %s, cost-tot_min: %s)' %(method,obj_value+all_negativeedgeweight_sum+tot_min,tot_min,obj_value+all_negativeedgeweight_sum))
 	"""
 	#######################
 	#######################
@@ -673,7 +688,7 @@ if __name__ == '__main__':
 		raise Exception('ERROR: malformed clustering')
 	print('LP-rounding successfully performed in %d ms' %(runtime))
 	cc_cost = _CC_cost(clustering,graph) + tot_min
-	print('CC cost of O(log n)-approximation algorithm\'s output clustering: %s (tot_min: %s)' %(cc_cost,tot_min))
+	print('CC cost of O(log n)-approximation algorithm\'s output clustering: %s (tot_min: %s, cost-tot_min: %s)' %(cc_cost,tot_min,cc_cost-tot_min))
 	print('O(log n)-approximation algorithm\'s output clustering:')
 	c = 1
 	for cluster in clustering:
