@@ -75,6 +75,8 @@ def _map_cluster(cluster,id2vertex):
 	return {id2vertex[u] for u in cluster}
 
 def _vertex_pair_id(i,j,n):
+	if i == j:
+		raise Exception('ERROR: i and j must be different')
 	lb = min(i,j)
 	ub = max(i,j)
 	return int(lb*n-(lb*(lb+1)/2))+ub-lb-1
@@ -287,25 +289,32 @@ def _incremental_cut(old_ball,new_ball_vertices,valid_vertices,graph):
 						incr_cut += graph[u][v][0]
 	return incr_cut
 
-def _vol(ball,valid_vertices,graph,num_vertices,x,r):
+# need to pass the ball center ('u' in the paper) in order to properly compute the fractional weighted distance of positive edges leaving the ball
+def _vol(ball_center,ball,valid_vertices,graph,num_vertices,x,r):
 	vol = 0
-	for u in ball:
-		if u in graph:
-			for v in graph[u]:
-				if v in valid_vertices:
-					xuv = x[_vertex_pair_id(u,v,num_vertices)]
-					if v in ball:
-						if u<v:#check not to consider xuv two times
-							vol += xuv*graph[u][v][0]
+	for v in ball:
+		if v in graph and v != ball_center:
+			iduv = _vertex_pair_id(ball_center,v,num_vertices)
+			xuv = x[iduv]
+			#print('u: %d, v: %d, xuv: %s' %(ball_center,v,xuv))
+			for w in graph[v]:
+				if w in valid_vertices:
+					idvw = _vertex_pair_id(v,w,num_vertices)
+					xvw = x[idvw]
+					if w in ball:
+						if v<w: #check not to consider xvw two times
+							vol += xvw*graph[v][w][0]
 					else:
-						vol += (r-xuv)*graph[u][v][0]
+						if r < xuv:
+							raise Exception('ERROR: radius cannot be less than the distance between the ball center and any vertex in the ball---r: %s, xuv: %s' %(r,xuv))
+						vol += (r-xuv)*graph[v][w][0]
 	return vol
 
 def _vol_whole_graph(graph,num_vertices,x):
 	vol = 0
 	for u in graph.keys():
 		for v in graph[u]:
-			if u < v:#check not to consider xuv two times
+			if u < v: #check not to consider xuv two times
 				xuv = x[_vertex_pair_id(u,v,num_vertices)]
 				cuv = graph[u][v][0]
 				vol += xuv*cuv
@@ -324,35 +333,64 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 	for u in shuffled_vertices:
 		if u in remaining_vertices:
 			du = _sorted_distances(u,remaining_vertices,n,x)
-			ball = {u}
-			cut = _cut(ball,remaining_vertices,graph)
 			vol = F/n #default initial volume of a ball
-			while cut > const*log(n+1)*vol and du:#'log' returns natural logarithm
-				r = du[0][1]#minimum distance in du
-				i = 0
-				while i<len(du) and du[i][1]<=r:
-					i += 1
-				new_ball_vertices = {v for (v,d) in du[0:i]}
-				incr_cut = _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph)
-				cut += incr_cut
-				ball.update(new_ball_vertices)
-				vol = _vol(ball,remaining_vertices,graph,n,x,r)#cannot be done incrementally as r changes in every iteration, so all vertices in current ball must be visited again
-				"""
-				#######################
-				#######################
-				#######################
-				## DEBUG:
-				cut_check = _cut(ball,remaining_vertices,graph)
-				#cut = cut_check
-				tolerance = 0.0000000001
-				if abs(cut-cut_check) > tolerance:
-					print('ERROR! cut incremental: %s, cut from scratch: %s' %(str(cut),str(cut_check)))
-					sys.exit()
-				#######################
-				#######################
-				#######################
-				"""
-				du = du[i:]
+			r = 0 #starting radius
+
+			ball = set()
+			i = 0
+			while i<len(du) and du[i][1] <= r:
+				i += 1
+			new_ball_vertices = {v for (v,d) in du[0:i]} #vertices at distance 0 from u
+			new_ball_vertices.add(u)
+			cut = _cut(new_ball_vertices,remaining_vertices,graph)
+			du = du[i:]
+			"""
+			#######################
+			#######################
+			#######################
+			## DEBUG:
+			if not (cut > const*log(n+1)*vol and new_ball_vertices):
+				raise Exception('ERROR: the very first time the \'cut > const*log(n+1)*vol\'condition must be met--lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
+			#######################
+			#######################
+			#######################
+			"""
+
+			it = 0
+			while it == 0 or (cut > const*log(n+1)*vol and new_ball_vertices): #'log' returns natural logarithm
+				#print('Radius at the beginning of the iteration: %s' %(r))
+				ball.update(new_ball_vertices) #ball is actually updated (with the vertices retrieved in the previous iteration) only if the while condition is met
+				if du:
+					#grow r and compute cut and vol of the possible new ball
+					r = du[0][1] #minimum distance in du
+					#print('Radius at the end of the iteration: %s' %(r))
+					i = 0
+					while i<len(du) and du[i][1]<=r:
+						i += 1
+					new_ball_vertices = {v for (v,d) in du[0:i]} #vertices to be added to the previous ball so as to have the possible new ball
+					new_ball = ball.union(new_ball_vertices) #possible new ball
+					cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut of the possible new ball, computed incrementally
+					vol = _vol(u,new_ball,remaining_vertices,graph,n,x,r) #vol of the possible new ball; it is not convenient to compute it incrementally as r changes in every iteration, so all vertices in current ball must be visited again anywayy
+					du = du[i:]
+					"""
+					#######################
+					#######################
+					#######################
+					## DEBUG:
+					incr_cut = _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph)
+					cut_check = _cut(ball,remaining_vertices,graph)
+					#cut = cut_check
+					tolerance = 0.0000000001
+					if abs(cut-cut_check) > tolerance:
+						print('ERROR! cut incremental: %s, cut from scratch: %s' %(str(cut),str(cut_check)))
+						sys.exit()
+					#######################
+					#######################
+					#######################
+					"""
+				else:
+					new_ball_vertices = {}
+				it += 1
 			clusters.append(ball)
 			for v in ball:
 				remaining_vertices.remove(v)
