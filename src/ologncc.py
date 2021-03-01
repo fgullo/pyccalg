@@ -328,69 +328,56 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 	remaining_vertices = set(id2vertex.keys())
 	shuffled_vertices = list(id2vertex.keys())
 	random.shuffle(shuffled_vertices)
-	F = _vol_whole_graph(graph,n,x)
+	#F = _vol_whole_graph(graph,n,x)
 
 	for u in shuffled_vertices:
 		if u in remaining_vertices:
 			du = _sorted_distances(u,remaining_vertices,n,x)
-			vol = F/n #default initial volume of a ball
-			r = 0 #starting radius
+			#vol = F/n #default initial volume of a ball; while it is defined in the paper, it is just a technicality; the herein implementation allows for avoiding it
 
-			ball = set()
+			#initial ball is composed of all vertices at distance 0 from u
+			ball = {u}
 			i = 0
-			while i<len(du) and du[i][1] <= r:
+			while i<len(du) and du[i][1]==0:
 				i += 1
-			new_ball_vertices = {v for (v,d) in du[0:i]} #vertices at distance 0 from u
-			new_ball_vertices.add(u)
-			cut = _cut(new_ball_vertices,remaining_vertices,graph)
+			for (v,d) in du[0:i]:
+				ball.add(v)
+			cut = _cut(ball,remaining_vertices,graph)
 			du = du[i:]
-			"""
-			#######################
-			#######################
-			#######################
-			## DEBUG:
-			if not (cut > const*log(n+1)*vol and new_ball_vertices):
-				raise Exception('ERROR: the very first time the \'cut > const*log(n+1)*vol\'condition must be met--lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
-			#######################
-			#######################
-			#######################
-			"""
 
-			it = 0
-			while it == 0 or (cut > const*log(n+1)*vol and new_ball_vertices): #'log' returns natural logarithm
-				#print('Radius at the beginning of the iteration: %s' %(r))
-				ball.update(new_ball_vertices) #ball is actually updated (with the vertices retrieved in the previous iteration) only if the while condition is met
-				if du:
-					#grow r and compute cut and vol of the possible new ball
-					r = du[0][1] #minimum distance in du
-					#print('Radius at the end of the iteration: %s' %(r))
-					i = 0
-					while i<len(du) and du[i][1]<=r:
-						i += 1
-					new_ball_vertices = {v for (v,d) in du[0:i]} #vertices to be added to the previous ball so as to have the possible new ball
-					new_ball = ball.union(new_ball_vertices) #possible new ball
-					cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut of the possible new ball, computed incrementally
-					vol = _vol(u,new_ball,remaining_vertices,graph,n,x,r) #vol of the possible new ball; it is not convenient to compute it incrementally as r changes in every iteration, so all vertices in current ball must be visited again anywayy
-					du = du[i:]
-					"""
-					#######################
-					#######################
-					#######################
-					## DEBUG:
-					incr_cut = _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph)
-					cut_check = _cut(ball,remaining_vertices,graph)
-					#cut = cut_check
-					tolerance = 0.0000000001
-					if abs(cut-cut_check) > tolerance:
-						print('ERROR! cut incremental: %s, cut from scratch: %s' %(str(cut),str(cut_check)))
-						sys.exit()
-					#######################
-					#######################
-					#######################
-					"""
-				else:
-					new_ball_vertices = {}
-				it += 1
+			while du:
+				#grow r and compute cut and vol of the possible new ball
+				r = du[0][1] #minimum distance in du
+				i = 0
+				while i<len(du) and du[i][1]<=r:
+					i += 1
+				new_ball_vertices = {v for (v,d) in du[0:i]}
+				cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut of the possible new ball, computed incrementally
+				ball.update(new_ball_vertices)
+				vol = _vol(u,ball,remaining_vertices,graph,n,x,r) #vol of the possible new ball; it is not convenient to compute it incrementally as r changes in every iteration, so all vertices in current ball must be visited again anywayy
+				du = du[i:]
+
+				if cut <= const*log(n+1)*vol: #'log' returns natural logarithm
+					#'roll-back' to the previous ball and exit the loop
+					for v in new_ball_vertices:
+						ball.remove(v)
+					break
+				"""
+				#######################
+				#######################
+				#######################
+				## DEBUG:
+				incr_cut = _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph)
+				cut_check = _cut(ball,remaining_vertices,graph)
+				#cut = cut_check
+				tolerance = 0.0000000001
+				if abs(cut-cut_check) > tolerance:
+					print('ERROR! cut incremental: %s, cut from scratch: %s' %(str(cut),str(cut_check)))
+					sys.exit()
+				#######################
+				#######################
+				#######################
+				"""
 			clusters.append(ball)
 			for v in ball:
 				remaining_vertices.remove(v)
