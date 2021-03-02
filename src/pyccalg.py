@@ -315,9 +315,8 @@ def _incremental_cut(old_ball,new_ball_vertices,valid_vertices,graph):
 def _vol(ball_center,ball,valid_vertices,graph,num_vertices,x,r):
 	vol = 0
 	for v in ball:
-		if v in graph and v != ball_center:
-			iduv = _vertex_pair_id(ball_center,v,num_vertices)
-			xuv = x[iduv]
+		if v in graph:
+			xuv = 0 if v==ball_center else x[_vertex_pair_id(ball_center,v,num_vertices)]
 			#print('u: %d, v: %d, xuv: %s' %(ball_center,v,xuv))
 			for w in graph[v]:
 				if w in valid_vertices:
@@ -410,17 +409,18 @@ def round_demaine(x,id2vertexpair,id2vertex,edges,graph,const):
 	return clusters
 
 #rounding algorithm proposed in Charikar et al., "Clustering with Qualitative Information", JCSS 2005
-def round_charikar(x,id2vertexpair,id2vertex,edges,graph):
+def round_charikar(x,id2vertexpair,id2vertex,edges,graph,lp_cost):
 	clusters = []
 	n = len(id2vertex)
 	remaining_vertices = set(id2vertex.keys())
 	shuffled_pairs = [id2vertexpair[h] for h in range(len(x)) if x[h]>2/3]
 	random.shuffle(shuffled_pairs)
-	r = 1/3 - eps
+	#r = 1/3 - eps
 
 	for (i,j) in shuffled_pairs:
 		if i in remaining_vertices and j in remaining_vertices:
 			ball = {i}
+			r = _best_radius_charikar(i,x,remaining_vertices,n,graph,lp_cost)
 			for k in remaining_vertices:
 				if k!=i and x[_vertex_pair_id(i,k,n)]<=r:
 					ball.add(k)
@@ -431,6 +431,37 @@ def round_charikar(x,id2vertexpair,id2vertex,edges,graph):
 		clusters.append({i})
 
 	return clusters
+
+def _best_radius_charikar(ball_center,x,valid_vertices,n,graph,lp_cost):
+	d = _sorted_distances(ball_center,valid_vertices,n,x)
+	r = 1/3 - eps
+
+	i = 0
+	while i<len(d) and d[i][1]<1/3:
+		i += 1
+	d = d[0:i]
+
+	if d:
+		r = 0
+		ball = {ball_center}
+		cut = _cut(ball,valid_vertices,graph)
+		vol = lp_cost/n + _vol(ball_center,ball,valid_vertices,graph,n,x,r)
+		best_ratio = float('inf') if vol==0 else cut/vol
+		while d:
+			new_r = d[0][1] #d[0][1]: minimum distance in d
+			i = 0
+			while i<len(d) and d[i][1]<=new_r:
+				i += 1
+			new_ball_vertices = {v for (v,d) in d[0:i]}
+			cut += _incremental_cut(ball,new_ball_vertices,valid_vertices,graph) #cut can be computed incrementally
+			ball.update(new_ball_vertices)
+			vol = lp_cost/n + _vol(ball_center,ball,valid_vertices,graph,n,x,new_r)
+			ratio = float('inf') if vol==0 else cut/vol
+			if ratio<best_ratio:
+				best_ratio = ratio
+				r = new_r
+			d = d[i:]
+	return r
 
 #well-established randomized, linear-time algorithm for correlation clustering, achiving constant-factor approximation guarantees on complete graphs
 #see Ailon et al., "Aggregating inconsistent informa- tion: Ranking and clustering", JACM 2008
@@ -720,7 +751,7 @@ if __name__ == '__main__':
 		start=time.time()
 		clustering = None
 		if algorithm == 'charikar':
-			clustering = round_charikar(lp_var_assignment,id2vertexpair,id2vertex,edges,graph)
+			clustering = round_charikar(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,lp_cost-tot_min)
 		elif algorithm == 'demaine':
 			clustering = round_demaine(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
 		runtime = _running_time_ms(start)
