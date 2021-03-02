@@ -24,7 +24,7 @@
 * Optional arguments: 
    * `-r <LB,UB>`, if you want to generate random edge weights from `[LB,UB]` range
    * `-a <PROB>`, if you want to randomly add edges with probability `PROB`
-   * `-m {'charikar','demaine','kwik'}`, to choose the algorithm (default: `'charikar'` (it seems faster))
+   * `-m {'charikar','demaine','kwik'}`, to choose the algorithm (default: `'charikar'`). NOTE: `kwikcluster` is always run too
    * `-s {'pulp','scipy'}`, to select the solver to be used (default: `'scipy'` (it seems faster))
 * Dataset-file format:
    * First line: `#VERTICES \t #EDGES`
