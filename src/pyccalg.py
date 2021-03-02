@@ -338,7 +338,7 @@ def _vol_whole_graph(graph,num_vertices,x):
 	return vol
 
 #rounding algorithm proposed in Demaine et al., "Correlation clustering in general weighted graphs", TCS 2006
-def _round_demaine(x,id2vertexpair,id2vertex,edges,graph,const):
+def round_demaine(x,id2vertexpair,id2vertex,edges,graph,const):
 	clusters = []
 	n = len(id2vertex)
 	remaining_vertices = set(id2vertex.keys())
@@ -404,7 +404,7 @@ def _round_demaine(x,id2vertexpair,id2vertex,edges,graph,const):
 	return clusters
 
 #rounding algorithm proposed in Charikar et al., "Clustering with Qualitative Information", JCSS 2005
-def _round_charikar(x,id2vertexpair,id2vertex,edges,graph):
+def round_charikar(x,id2vertexpair,id2vertex,edges,graph):
 	clusters = []
 	n = len(id2vertex)
 	remaining_vertices = set(id2vertex.keys())
@@ -428,7 +428,7 @@ def _round_charikar(x,id2vertexpair,id2vertex,edges,graph):
 
 #well-established randomized, linear-time algorithm for correlation clustering, achiving constant-factor approximation guarantees on complete graphs
 #see Ailon et al., "Aggregating inconsistent informa- tion: Ranking and clustering", JACM 2008
-def _kwikcluster(id2vertex,graph):
+def kwikcluster(id2vertex,graph):
 	clusters = []
 	n = len(id2vertex)
 	remaining_vertices = set(id2vertex.keys())
@@ -620,7 +620,7 @@ if __name__ == '__main__':
 	print(separator)
 	print('Running KwikCluster algorithm...')
 	start = time.time()
-	kc_clustering = _kwikcluster(id2vertex,graph)
+	kc_clustering = kwikcluster(id2vertex,graph)
 	runtime = _running_time_ms(start)
 	check_clustering = _check_clustering(kc_clustering,n)
 	if not check_clustering:
@@ -709,8 +709,8 @@ if __name__ == '__main__':
 	print(separator)
 	print('O(log n)-approximation algorithm - Rounding the LP solution...')
 	start=time.time()
-	#clustering = _round_demaine(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
-	clustering = _round_charikar(lp_var_assignment,id2vertexpair,id2vertex,edges,graph)
+	#clustering = round_demaine(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
+	clustering = round_charikar(lp_var_assignment,id2vertexpair,id2vertex,edges,graph)
 	runtime = _running_time_ms(start)
 	check_clustering = _check_clustering(clustering,n)
 	if not check_clustering:
