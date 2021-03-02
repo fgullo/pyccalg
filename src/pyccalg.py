@@ -9,7 +9,7 @@ eps = 0.0000000001
 def _running_time_ms(start):
 	return int(round((time.time()-start)*1000))
 
-def _load(dataset_path,random_edgeweight_generation):
+def _load(dataset_path,random_edgeweight_generation,edge_addition_prob):
 	with open(dataset_path) as f:
 		tot_min = 0
 		id2vertex = {}
@@ -53,11 +53,11 @@ def _load(dataset_path,random_edgeweight_generation):
 				graph[uid][vid] = (wp-min_pn,wn-min_pn)
 				graph[vid][uid] = (wp-min_pn,wn-min_pn)
 
-		if random_edgeweight_generation:
-			#generate weights for non-existing edges (with uniform probability)
+		if random_edgeweight_generation and edge_addition_prob > 0:
+			#generate weights for non-existing edges (with probability 'edge_addition_prob')
 			for uid in graph.keys():
 				for vid in id2vertex.keys():
-					if uid<vid and vid not in graph[u] and random.random()>=0.5:
+					if uid<vid and vid not in graph[u] and random.random()<=edge_addition_prob:
 						wp = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
 						wn = random.uniform(random_edgeweight_generation[0],random_edgeweight_generation[1])
 						min_pn = min(wp,wn)
@@ -72,12 +72,14 @@ def _read_params():
 	dataset_file = None
 	random_edgeweight_generation = None
 	solver = 'scipy'
-	short_params = 'd:r:s:'
-	long_params = ['dataset=','random=','solver=']
+	algorithm = 'charikar'
+	edge_addition_prob = -1
+	short_params = 'd:r:s:a:m:'
+	long_params = ['dataset=','random=','solver=','addedges=','method=']
 	try:
 		arguments, values = getopt.getopt(sys.argv[1:], short_params, long_params)
 	except getopt.error as err:
-		print('ologncc.py -d <dataset_file> [-r <rnd_edge_weight_LB,rnd_edge_weight_UB>] [-s <solver>]')
+		print('ologncc.py -d <dataset_file> [-r <rnd_edge_weight_LB,rnd_edge_weight_UB>] [-a <edge_addition_probability>] [-s <solver>] [-m <algorithm>]')
 		sys.exit(2)
 	for arg, value in arguments:
 		if arg in ('-d', '--dataset'):
@@ -86,7 +88,11 @@ def _read_params():
 			random_edgeweight_generation = [float(x) for x in value.split(',')]
 		elif arg in ('-s', '--solver'):
 			solver = value.lower()
-	return (dataset_file,random_edgeweight_generation,solver)
+		elif arg in ('-a', '--addedges'):
+			edge_addition_prob = float(value)
+		elif arg in ('-m', '--method'):
+			algorithm = value.lower()
+	return (dataset_file,random_edgeweight_generation,edge_addition_prob,solver,algorithm)
 
 def _map_cluster(cluster,id2vertex):
 	return {id2vertex[u] for u in cluster}
@@ -584,13 +590,13 @@ def _check_clustering(clustering,num_vertices):
 
 if __name__ == '__main__':
 	#read parameters
-	(dataset_file,random_edgeweight_generation,solver) = _read_params()
+	(dataset_file,random_edgeweight_generation,edge_addition_prob,solver,algorithm) = _read_params()
 
 	#load dataset
 	print(separator)
 	print('Loading dataset \'%s\'...' %(dataset_file))
 	start = time.time()
-	(id2vertex,vertex2id,edges,graph,tot_min) = _load(dataset_file,random_edgeweight_generation)
+	(id2vertex,vertex2id,edges,graph,tot_min) = _load(dataset_file,random_edgeweight_generation,edge_addition_prob)
 	runtime = _running_time_ms(start)
 	n = len(id2vertex)
 	m = len(edges)
@@ -603,6 +609,8 @@ if __name__ == '__main__':
 	print('#vertex triples: %d' %(vertex_triples))
 	if random_edgeweight_generation:
 		print('Edge weights randomly generated from [%s,%s]' %(random_edgeweight_generation[0],random_edgeweight_generation[1]))
+		if edge_addition_prob > 0:
+			print('Edge-addition probability: %s' %(edge_addition_prob))
 	all_edgeweights_sum = _all_edgeweights_sum(graph)
 	max_edgeweight_gap = _max_edgeweight_gap(graph)
 	print('Global condition (without tot_min): %s >= %s ?' %(all_edgeweights_sum/vertex_pairs,max_edgeweight_gap))
@@ -635,92 +643,96 @@ if __name__ == '__main__':
 		print('Cluster ' + str(c) + ': ' + str(sorted(mapped_cluster)))
 		c += 1
 
-	#build linear program
-	print(separator)
-	print('O(log n)-approximation algorithm - Building linear program (solver: %s)...' %(solver))
-	start = time.time()
-	id2vertexpair = _vertex_pair_ids(n)
-	model = None
-	A = None
-	b = None
-	c = None
-	c_nonzero = None
-	if solver == 'pulp':
-		model = _linear_program_pulp(n,edges,graph)
-	elif solver == 'scipy':
-		(A,b,c) = _linear_program_scipy(n,edges,graph)
-		c_nonzero = len([x for x in c if x != 0])
-	else:
-		raise Exception('Solver \'%s\' not supported' %(solver))
-	runtime = _running_time_ms(start)
-	print('Linear program successfully built in %d ms' %(runtime))
-	if solver == 'scipy':
-		print('#variables: %d (must be equal to #vertex pairs, i.e., equal to %d)' %(len(c),vertex_pairs))
-		print('#inequality constraints: %d (must be equal to 3 * #vertex triples, i.e., equal to %d)' %(len(A),3*vertex_triples))
-		print('#non-zero entries in cost vector: %d (must be <= #edges, i.e., <= %d)' %(c_nonzero,m))
+	if algorithm == 'charikar' or algorithm == 'demaine':
+		#build linear program
+		print(separator)
+		print('O(log n)-approximation algorithm - Building linear program (solver: %s)...' %(solver))
+		start = time.time()
+		id2vertexpair = _vertex_pair_ids(n)
+		model = None
+		A = None
+		b = None
+		c = None
+		c_nonzero = None
+		if solver == 'pulp':
+			model = _linear_program_pulp(n,edges,graph)
+		elif solver == 'scipy':
+			(A,b,c) = _linear_program_scipy(n,edges,graph)
+			c_nonzero = len([x for x in c if x != 0])
+		else:
+			raise Exception('Solver \'%s\' not supported' %(solver))
+		runtime = _running_time_ms(start)
+		print('Linear program successfully built in %d ms' %(runtime))
+		if solver == 'scipy':
+			print('#variables: %d (must be equal to #vertex pairs, i.e., equal to %d)' %(len(c),vertex_pairs))
+			print('#inequality constraints: %d (must be equal to 3 * #vertex triples, i.e., equal to %d)' %(len(A),3*vertex_triples))
+			print('#non-zero entries in cost vector: %d (must be <= #edges, i.e., <= %d)' %(c_nonzero,m))
 
-	#solving linear program
-	print(separator)
-	print('O(log n)-approximation algorithm - Solving linear program (solver: %s)...' %(solver))
-	start=time.time()
-	lp_var_assignment = None
-	obj_value = None
-	method = ''
-	if solver == 'pulp':
-		method = 'PuLP'
-		(lp_var_assignment,obj_value) = _solve_lp_pulp(model)
-	elif solver == 'scipy':
-		method = 'SciPy'
-		(lp_var_assignment,obj_value) = _solve_lp_scipy(A,b,c)
-	else:
-		raise Exception('Solver \'%s\' not supported' %(solver))
-	runtime = _running_time_ms(start)
-	lp_cost = _lp_solution_cost(lp_var_assignment,graph,n) + tot_min
-	print('Linear program successfully solved in %d ms' %(runtime))
-	print('Size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
-	print('Cost of the LP solution: %s (tot_min: %s, cost-tot_min: %s)' %(lp_cost,tot_min,lp_cost-tot_min))
-	all_negativeedgeweight_sum = _all_negativeedgeweight_sum(graph)
-	print('Cost of the LP solution (according to %s): %s (tot_min: %s, cost-tot_min: %s)' %(method,obj_value+all_negativeedgeweight_sum+tot_min,tot_min,obj_value+all_negativeedgeweight_sum))
-	"""
-	#######################
-	#######################
-	#######################
-	## DEBUG:
-	if solver == 'pulp':
-		(A,b,c) = _linear_program_scipy(n,edges,graph)
-		(lp_var_assignment_scipy,obj_value_scipy) = _solve_lp_scipy(A,b,c)
-		lp_cost_scipy = _lp_solution_cost(lp_var_assignment_scipy,graph,n) + tot_min
-		print('Cost of the SciPy LP solution: %s (tot_min: %s)' %(lp_cost_scipy,tot_min))
-		print('Cost of the SciPy LP solution (according to SciPy): %s (tot_min: %s)' %(obj_value_scipy+all_negativeedgeweight_sum+tot_min,tot_min))
-		for i in range(len(lp_var_assignment)):
-			scipy_val = lp_var_assignment_scipy[i]
-			pulp_val = lp_var_assignment[i]
-			diff = abs(scipy_val-pulp_val)
-			pedix = '(difference: ' + str(diff) + ')' if diff>0 else ''
-			print('x_%d (SciPy, PuLP): %s %s %s' %(i,scipy_val,pulp_val,pedix))
-	else:
-		print(lp_var_assignment)
-	#######################
-	#######################
-	#######################
-	"""
+		#solving linear program
+		print(separator)
+		print('O(log n)-approximation algorithm - Solving linear program (solver: %s)...' %(solver))
+		start=time.time()
+		lp_var_assignment = None
+		obj_value = None
+		method = ''
+		if solver == 'pulp':
+			method = 'PuLP'
+			(lp_var_assignment,obj_value) = _solve_lp_pulp(model)
+		elif solver == 'scipy':
+			method = 'SciPy'
+			(lp_var_assignment,obj_value) = _solve_lp_scipy(A,b,c)
+		else:
+			raise Exception('Solver \'%s\' not supported' %(solver))
+		runtime = _running_time_ms(start)
+		lp_cost = _lp_solution_cost(lp_var_assignment,graph,n) + tot_min
+		print('Linear program successfully solved in %d ms' %(runtime))
+		print('Size of the solution array: %d (must be equal to #variables)' %(len(lp_var_assignment)))
+		print('Cost of the LP solution: %s (tot_min: %s, cost-tot_min: %s)' %(lp_cost,tot_min,lp_cost-tot_min))
+		all_negativeedgeweight_sum = _all_negativeedgeweight_sum(graph)
+		print('Cost of the LP solution (according to %s): %s (tot_min: %s, cost-tot_min: %s)' %(method,obj_value+all_negativeedgeweight_sum+tot_min,tot_min,obj_value+all_negativeedgeweight_sum))
+		"""
+		#######################
+		#######################
+		#######################
+		## DEBUG:
+		if solver == 'pulp':
+			(A,b,c) = _linear_program_scipy(n,edges,graph)
+			(lp_var_assignment_scipy,obj_value_scipy) = _solve_lp_scipy(A,b,c)
+			lp_cost_scipy = _lp_solution_cost(lp_var_assignment_scipy,graph,n) + tot_min
+			print('Cost of the SciPy LP solution: %s (tot_min: %s)' %(lp_cost_scipy,tot_min))
+			print('Cost of the SciPy LP solution (according to SciPy): %s (tot_min: %s)' %(obj_value_scipy+all_negativeedgeweight_sum+tot_min,tot_min))
+			for i in range(len(lp_var_assignment)):
+				scipy_val = lp_var_assignment_scipy[i]
+				pulp_val = lp_var_assignment[i]
+				diff = abs(scipy_val-pulp_val)
+				pedix = '(difference: ' + str(diff) + ')' if diff>0 else ''
+				print('x_%d (SciPy, PuLP): %s %s %s' %(i,scipy_val,pulp_val,pedix))
+		else:
+			print(lp_var_assignment)
+		#######################
+		#######################
+		#######################
+		"""
 
-	#rounding lp solution
-	print(separator)
-	print('O(log n)-approximation algorithm - Rounding the LP solution...')
-	start=time.time()
-	#clustering = round_demaine(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
-	clustering = round_charikar(lp_var_assignment,id2vertexpair,id2vertex,edges,graph)
-	runtime = _running_time_ms(start)
-	check_clustering = _check_clustering(clustering,n)
-	if not check_clustering:
-		raise Exception('ERROR: malformed clustering')
-	print('LP-rounding successfully performed in %d ms' %(runtime))
-	cc_cost = _CC_cost(clustering,graph) + tot_min
-	print('CC cost of O(log n)-approximation algorithm\'s output clustering: %s (tot_min: %s, cost-tot_min: %s)' %(cc_cost,tot_min,cc_cost-tot_min))
-	print('O(log n)-approximation algorithm\'s output clustering:')
-	c = 1
-	for cluster in clustering:
-		mapped_cluster = _map_cluster(cluster,id2vertex)
-		print('Cluster ' + str(c) + ': ' + str(sorted(mapped_cluster)))
-		c += 1
+		#rounding lp solution
+		print(separator)
+		print('O(log n)-approximation algorithm - Rounding the LP solution (rounding algorithm: %s)...' %(algorithm))
+		start=time.time()
+		clustering = None
+		if algorithm == 'charikar':
+			clustering = round_charikar(lp_var_assignment,id2vertexpair,id2vertex,edges,graph)
+		elif algorithm == 'demaine':
+			clustering = round_demaine(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
+		runtime = _running_time_ms(start)
+		check_clustering = _check_clustering(clustering,n)
+		if not check_clustering:
+			raise Exception('ERROR: malformed clustering')
+		print('LP-rounding successfully performed in %d ms' %(runtime))
+		cc_cost = _CC_cost(clustering,graph) + tot_min
+		print('CC cost of O(log n)-approximation algorithm\'s output clustering: %s (tot_min: %s, cost-tot_min: %s)' %(cc_cost,tot_min,cc_cost-tot_min))
+		print('O(log n)-approximation algorithm\'s output clustering:')
+		c = 1
+		for cluster in clustering:
+			mapped_cluster = _map_cluster(cluster,id2vertex)
+			print('Cluster ' + str(c) + ': ' + str(sorted(mapped_cluster)))
+			c += 1
