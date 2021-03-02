@@ -1,9 +1,9 @@
 # PyCCAlg - Correlation-Clustering Algorithms in Python
 `Python` implementation of some algorithms for `Correlation Clustering`. Specifically:
 * Linear-programming + region-growing O(log n)-approximation algorithms for general weighted graphs
-   * [Demaine et al.'s](https://www.sciencedirect.com/science/article/pii/S0304397506003227)) rounding algorithm (`_round_demaine` in `src/pyccalg.py`)
-   * [Charikar et al.'s](https://www.sciencedirect.com/science/article/pii/S0022000004001424)) rounding algorithm (`_round_charikar` in `src/pyccalg.py`)
-* [`KwikCluster`] randomized, linear-time algorithm ([Ailon et al., JACM 2008](https://doi.org/10.1145/1411509.1411513)), achieving constant-factor approximation guarantees on complete graphs satisfying certain constraints (e.g., probability constraint and/or triangle-inequality constraint)
+   * `_round_demaine` in `src/pyccalg.py`: [Demaine et al.'s](https://www.sciencedirect.com/science/article/pii/S0304397506003227) rounding algorithm
+   * `_round_charikar` in `src/pyccalg.py`: [Charikar et al.'s](https://www.sciencedirect.com/science/article/pii/S0022000004001424) rounding algorithm
+* `_kwikcluster` in `src/pyccalg.py`: `KwikCluster` randomized, linear-time algorithm ([Ailon et al., JACM 2008](https://doi.org/10.1145/1411509.1411513)), achieving constant-factor approximation guarantees on complete graphs satisfying certain constraints (e.g., probability constraint and/or triangle-inequality constraint)
 
 
 
