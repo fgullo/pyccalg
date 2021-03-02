@@ -1,13 +1,15 @@
-import os, sys, getopt, time
+import os, sys, getopt, time, random
+from math import log
 import pulp as plp
+from scipy.optimize import linprog
 
 separator = '---------------'
+eps = 0.0000000001
 
 def _running_time_ms(start):
 	return int(round((time.time()-start)*1000))
 
 def _load(dataset_path,random_edgeweight_generation):
-	import random
 	with open(dataset_path) as f:
 		tot_min = 0
 		id2vertex = {}
@@ -170,7 +172,6 @@ def _solve_lp_scipy(A,b,c):
 	#Method ‘highs’ chooses between the two automatically.
 	#For new code involving linprog, we recommend explicitly choosing one of these three method values
 	#instead of ‘interior-point’ (default), ‘revised simplex’, and ‘simplex’ (legacy).
-	from scipy.optimize import linprog
 	#lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)])
 	#lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)], method='simplex')
 	lp_solution = linprog(c, A_ub=A, b_ub=b, bounds=[(0,1)], method='highs-ipm')
@@ -325,6 +326,7 @@ def _vol(ball_center,ball,valid_vertices,graph,num_vertices,x,r):
 						vol += (r-xuv)*graph[v][w][0]
 	return vol
 
+#'F' in the paper
 def _vol_whole_graph(graph,num_vertices,x):
 	vol = 0
 	for u in graph.keys():
@@ -335,9 +337,8 @@ def _vol_whole_graph(graph,num_vertices,x):
 				vol += xuv*cuv
 	return vol
 
-def _round(x,id2vertexpair,id2vertex,edges,graph,const):
-	import random
-	from math import log
+#rounding algorithm proposed in Demaine et al., "Correlation clustering in general weighted graphs", TCS 2006
+def _round_demaine(x,id2vertexpair,id2vertex,edges,graph,const):
 	clusters = []
 	n = len(id2vertex)
 	remaining_vertices = set(id2vertex.keys())
@@ -367,21 +368,17 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 				while i<len(du) and du[i][1]<=r:
 					i += 1
 				new_ball_vertices = {v for (v,d) in du[0:i]}
-				cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut can be computed incrementally
-				ball.update(new_ball_vertices)
-				vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,r) #it is not convenient to compute vol incrementally as r changes in every iteration, so the vertices in the current ball must be all visited again anyway
-				du = du[i:]
-				"""
-				if i>0: #it means 'new_ball_vertices' is not empty
-					#cut and vol of the new ball; they are updated only if the ball has grown
+				if new_ball_vertices:
+					#'cut', 'ball', and 'du' are updated only if new ball vertices have been found
 					cut += _incremental_cut(ball,new_ball_vertices,remaining_vertices,graph) #cut can be computed incrementally
 					ball.update(new_ball_vertices)
-					vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,r)  #it is not convenient to compute vol incrementally as r changes in every iteration, so the vertices in the current ball must be all visited again anyway
 					du = du[i:]
-				"""
+				#'vol' is updated anyway, as 'r' may have changed
+				#it is not convenient to compute 'vol' incrementally as r changes in every iteration, so the vertices in the current ball must be all visited again anyway
+				vol = initial_vol + _vol(u,ball,remaining_vertices,graph,n,x,r)
 
-				if i==0 or cut <= const*log(n+1)*vol: #'log' returns natural logarithm
-					if i==0 and cut > const*log(n+1)*vol:
+				if not new_ball_vertices or cut <= const*log(n+1)*vol: #'log' returns natural logarithm
+					if not new_ball_vertices and cut > const*log(n+1)*vol:
 						#raise Exception('ERROR: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
 						print('WARNING: the condition \'cut<=const*log(n+1)*vol\' is not achieved for any r<1/c---lhs: %s, rhs: %s' %(cut,const*log(n+1)*vol))
 					break
@@ -406,8 +403,32 @@ def _round(x,id2vertexpair,id2vertex,edges,graph,const):
 				remaining_vertices.remove(v)
 	return clusters
 
+#rounding algorithm proposed in Charikar et al., "Clustering with Qualitative Information", JCSS 2005
+def _round_charikar(x,id2vertexpair,id2vertex,edges,graph):
+	clusters = []
+	n = len(id2vertex)
+	remaining_vertices = set(id2vertex.keys())
+	shuffled_pairs = [id2vertexpair[h] for h in range(len(x)) if x[h]>2/3]
+	random.shuffle(shuffled_pairs)
+	r = 1/3 - eps
+
+	for (i,j) in shuffled_pairs:
+		if i in remaining_vertices and j in remaining_vertices:
+			ball = {i}
+			for k in remaining_vertices:
+				if k!=i and x[_vertex_pair_id(i,k,n)]<=r:
+					ball.add(k)
+			clusters.append(ball)
+			for k in ball:
+				remaining_vertices.remove(k)
+	for i in remaining_vertices:
+		clusters.append({i})
+
+	return clusters
+
+#well-established randomized, linear-time algorithm for correlation clustering, achiving constant-factor approximation guarantees on complete graphs
+#see Ailon et al., "Aggregating inconsistent informa- tion: Ranking and clustering", JACM 2008
 def _kwikcluster(id2vertex,graph):
-	import random
 	clusters = []
 	n = len(id2vertex)
 	remaining_vertices = set(id2vertex.keys())
@@ -687,9 +708,9 @@ if __name__ == '__main__':
 	#rounding lp solution
 	print(separator)
 	print('O(log n)-approximation algorithm - Rounding the LP solution...')
-	eps = 0.0000000001
 	start=time.time()
-	clustering = _round(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
+	#clustering = _round_demaine(lp_var_assignment,id2vertexpair,id2vertex,edges,graph,2+eps)
+	clustering = _round_charikar(lp_var_assignment,id2vertexpair,id2vertex,edges,graph)
 	runtime = _running_time_ms(start)
 	check_clustering = _check_clustering(clustering,n)
 	if not check_clustering:
